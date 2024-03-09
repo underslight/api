@@ -1,0 +1,18 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+authors = ["Federico Fusco"]
+
+[dependencies]
+actix-web = "4"
+surrealdb = "1.1.1"
+thiserror = "1"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.auth]
+path = "../auth" 
+# git = "https://www.github.com/overslight/auth.git"

@@ -7,6 +7,7 @@ pub mod update;
 pub mod refresh;
 pub mod delete;
 pub mod register;
+pub mod disable;
 
 pub(crate) fn scope() -> Scope {
     web::scope("/auth")
@@ -17,4 +18,5 @@ pub(crate) fn scope() -> Scope {
         .service(delete::delete)
         .service(refresh::refresh)
         .service(update::update)
+        .service(disable::disable)
 }

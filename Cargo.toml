@@ -1,18 +1,23 @@
 [package]
 name = "api"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Federico Fusco"]
 
 [dependencies]
 actix-web = "4"
+actix-cors = "0.7"
 surrealdb = "1.1.1"
 thiserror = "1"
+
+[dependencies.actix-session]
+version = "0.9"
+features = ["cookie-session"]
 
 [dependencies.serde]
 version = "1"
 features = ["derive"]
 
 [dependencies.auth]
-path = "../auth" 
-# git = "https://www.github.com/overslight/auth.git"
+git = "https://www.github.com/overslight/auth.git"
+version = "0.1.18"

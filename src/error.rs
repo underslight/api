@@ -1,3 +1,4 @@
+use actix_session::{SessionGetError, SessionInsertError};
 use actix_web::{error::ResponseError, http::StatusCode, HttpResponse};
 use thiserror::Error;
 use serde::Serialize;
@@ -111,6 +112,18 @@ impl From<auth::error::AuthError> for ApiError {
             AuthError::Unknown(panic) => Self::Unknown(panic),
             _ => Self::Unknown("Something went wrong!".into()),
         }
+    }
+}
+
+impl From<SessionGetError> for ApiError {
+    fn from(_value: SessionGetError) -> Self {
+        Self::Unknown("Failed to authenticate!".into())
+    }
+}
+
+impl From<SessionInsertError> for ApiError {
+    fn from(_value: SessionInsertError) -> Self {
+        Self::Unknown("Failed to authenticate!".into())
     }
 }
 

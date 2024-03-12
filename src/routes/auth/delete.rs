@@ -1,13 +1,9 @@
+use actix_session::Session;
 use actix_web::{web::{Data, Json}, Responder};
 use auth::user::{token::Token, User};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use surrealdb::{engine::remote::ws::Client, Surreal};
 use crate::prelude::*;
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DeleteRequest {
-    pub access_token: Token,
-}
 
 #[derive(Debug, Serialize)]
 pub(crate) struct DeleteResponse {
@@ -15,10 +11,14 @@ pub(crate) struct DeleteResponse {
 }
 
 #[actix_web::delete("/delete")]
-pub(crate) async fn delete(Json(request): Json<DeleteRequest>, db: Data<Surreal<Client>>) -> ApiResult<impl Responder> {
+pub(crate) async fn delete(session: Session, db: Data<Surreal<Client>>) -> ApiResult<impl Responder> {
+
+    // Gets the user's access token
+    let access_token = session.get::<Token>("access_token")?
+        .ok_or(ApiError::TokenInvalid)?;
 
     // Fetches the user
-    let user = User::get_by_access_token(&db, &request.access_token)
+    let user = User::get_by_access_token(&db, &access_token)
         .await?;
 
     // Deletes the user

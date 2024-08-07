@@ -1,76 +1,46 @@
-pub mod routes;
-pub mod error;
-pub mod prelude;
-
-use actix_cors::Cors;
-use actix_session::{config::{CookieContentSecurity, PersistentSession, SessionLifecycle}, storage::CookieSessionStore, SessionMiddleware};
-use actix_web::{cookie::{Key, SameSite}, web, App, HttpServer};
-use surrealdb::engine::remote::ws::Ws;
-use surrealdb::opt::auth::Database;
-use surrealdb::Surreal;
-use routes::{auth, health};
+use actix_identity::IdentityMiddleware;
+use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+use actix_web::{cookie::Key, guard, web::{self, JsonConfig, QueryConfig}, App, HttpServer};
+use api::{error::ApiErrorType, middleware::{auth::AuthenticationMiddleware, database::DatabaseMiddleware}};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    
+    dotenvy::dotenv().unwrap();
+
+    // Cookie secret key
+    // Should be in .env file
+    let secret_key = Key::generate();
+
     // Connects to the database
-    let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+    let database_pool = api::database::create_pool();
+    println!("[STATUS]: Connected to database!");
 
-    // Authenticates the DB connection
-    db.signin(Database {
-        namespace: "alpha",
-        database: "auth",
-        username: "dev",
-        password: "ved",
-    }) 
-    .await
-    .unwrap();
-
-    let store_key = Key::generate();
-    
-    // Creates the API server
+    // Starts the HTTP server
     HttpServer::new(move || {
         App::new()
-
-            // Adds the database connection to the state
-            .app_data(web::Data::new(db.clone()))
-
-            // Adds the session management middleware
-            .wrap(
-                SessionMiddleware::builder(
-                    CookieSessionStore::default(),
-                    store_key.clone().into()
-                )
-                .cookie_content_security(CookieContentSecurity::Private)
-                .cookie_same_site(SameSite::None)
-                .session_lifecycle(SessionLifecycle::PersistentSession(PersistentSession::default()))
-                .build()
+            .app_data(
+                JsonConfig::default().error_handler(|_, _| ApiErrorType::Unknown("Invalid request body!".into()).into())
             )
-
-            // Sets up CORS policy
+            .app_data(
+                QueryConfig::default().error_handler(|_, _| ApiErrorType::Unknown("Invalid request GET parameters!".into()).into())
+            )   
+            .wrap(AuthenticationMiddleware::new())
+            .wrap(DatabaseMiddleware::new(database_pool.clone()))
+            .wrap(IdentityMiddleware::default())
             .wrap(
-                Cors::permissive()
+                SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
+                    .cookie_domain(Some("auth.server.com".into()))
+                    .cookie_http_only(false)
+                    .cookie_secure(false)
+                    .build(),
             )
-
-            // Registers the actual API
             .service(
-                web::scope("/api/v1")
-                    .service(auth::scope())
-                    .service(health::health)
+                web::scope("/api")
+                    .guard(guard::Host("auth.server.com"))
+                    .service(api::routes::scope()),
             )
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 80))?
     .run()
     .await
 }
-
-
-/* API Routes:
- * 
- * /api/v1/auth/authenticate/EmailPassword
- * /api/v1/auth/register    /EmailPassword
- * /api/v1/auth/add         /EmailPassword
- * /api/v1/auth/add         /EmailPassword
- * /api/v1/auth/remove      /mfa/EmailPassword 
- * /api/v1/auth/remove      /mfa/Totp 
- */

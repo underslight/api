@@ -1,2 +1,2 @@
 # api
-The API server
+The API server for our services

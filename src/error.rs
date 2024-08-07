@@ -1,130 +1,158 @@
-use actix_session::{SessionGetError, SessionInsertError};
-use actix_web::{error::ResponseError, http::StatusCode, HttpResponse};
-use thiserror::Error;
+use actix_web::{HttpResponse, ResponseError};
+use oauth2::http::StatusCode;
 use serde::Serialize;
+use thiserror::Error;
 
-#[derive(Error, Debug)]
-pub enum ApiError {
-    #[error("USER_NOT_FOUND")]
-    UserNotFound(String),
-    #[error("USER_DISABLED")]
-    UserDisabled(Vec<String>),
-    #[error("HASH_FAILED")]
-    HashFailed,
-    #[error("CREDENTIAL_DUPLICATE")]
-    CredentialDuplicate(String),
-    #[error("CREDENTIAL_ONLY")]
-    CredentialOnly(String),
-    #[error("CREDENTIAL_NOT_FOUND")]
-    CredentialNotFound(String),
-    #[error("MFA_REQUIRED")]
-    MfaRequired,
-    #[error("IO")]
-    Io(std::io::Error),
-    #[error("SAVE_FAILED")]
-    SaveFailed(String),
-    #[error("UPDATE_FAILED")]
-    UpdateFailed(String),
-    #[error("TOKEN_EXPIRED")]
-    TokenExpired,
-    #[error("TOKEN_INVALID")]
-    TokenInvalid,
-    #[error("DATABASE_OP_FAILED")]
-    DatabaseFailed(surrealdb::Error),    
-    #[error("UNKNOWN")]
+#[derive(Serialize, Error, Debug, Clone)]
+pub enum ApiErrorType {
+    #[error("The credentials are incorrect!")]
+    CredentialIncorrect,
+    #[error("Failed to connect to auth provider!")]
+    IncorrectOauthCode,
+    #[error("The user doesn\'t exist or couldn\'t be found!")]
+    UserNotFound,
+    #[error("The credential is disabled!")]
+    CredentialDisabled,
+    #[error("The user is already registered!")]
+    UserExists,
+    #[error("The user is already authenticated!")]
+    UserAuthenticated,
+    #[error("The authentication method is already associated!")]
+    CredentialAssociated,
+    #[error("Cannot remove the only associated authentication method!")]
+    CredentialCannotRemove,
+    #[error("The resource couldn\'t be found ot doesn\'t exist!")]
+    ResourceNotFound,
+    #[error("{0}")]
     Unknown(String),
 }
 
+#[derive(Serialize, Clone, Copy)]
+pub enum ApiErrorCode {
+    #[serde(rename = "AUTH/CREDENTIAL_INCORRECT")]
+    CredentialIncorrect,
+    #[serde(rename = "AUTH/INCORRECT_OAUTH_CODE")]
+    IncorrectOauthCode,
+    #[serde(rename = "AUTH/USER_NOT_FOUND")]
+    UserNotFound,
+    #[serde(rename = "AUTH/CREDENTIAL_DISABLED")]
+    CredentialDisabled,
+    #[serde(rename = "AUTH/USER_EXISTS")]
+    UserExists,
+    #[serde(rename = "AUTH/USER_AUTHENTICATED")]
+    UserAuthenticated,
+    #[serde(rename = "AUTH/CREDENTIAL_ASSOCIATED")]
+    CredentialAssociated,
+    #[serde(rename = "AUTH/CREDENTIAL_CANNOT_REMOVE")]
+    CredentialCannotRemove,
+    #[serde(rename = "AUTH/RESOURCE_NOT_FOUND")]
+    ResourceNotFound,
+    #[serde(rename = "AUTH/UNKNOWN")]
+    Unknown,
+}
+
 #[derive(Serialize)]
-pub struct ApiErrorResponse {
+struct ApiErrorResponse {
+    pub code: ApiErrorCode,
     pub message: String,
-    pub code: String,
 }
 
-impl From<&ApiError> for ApiErrorResponse {
-    fn from(value: &ApiError) -> Self {
+pub type ApiResult<T> = std::result::Result<T, ApiErrorType>;
+
+impl From<&ApiErrorType> for ApiErrorCode {
+    fn from(value: &ApiErrorType) -> Self {
+        match value {
+            ApiErrorType::CredentialIncorrect => Self::CredentialIncorrect,
+            ApiErrorType::IncorrectOauthCode => Self::IncorrectOauthCode,
+            ApiErrorType::UserNotFound => Self::UserNotFound,
+            ApiErrorType::CredentialDisabled => Self::CredentialDisabled,
+            ApiErrorType::UserExists => Self::UserExists,
+            ApiErrorType::UserAuthenticated => Self::UserAuthenticated,
+            ApiErrorType::CredentialAssociated => Self::CredentialAssociated,
+            ApiErrorType::CredentialCannotRemove => Self::CredentialCannotRemove,
+            ApiErrorType::Unknown(_) => Self::Unknown,
+            ApiErrorType::ResourceNotFound => Self::ResourceNotFound,
+        }
+    }
+}
+
+impl From<&ApiErrorType> for ApiErrorResponse {
+    fn from(value: &ApiErrorType) -> Self {
         Self {
-            message: match value {
-                ApiError::UserNotFound(m) 
-                | ApiError::CredentialDuplicate(m)
-                | ApiError::CredentialOnly(m)
-                | ApiError::CredentialNotFound(m)
-                | ApiError::SaveFailed(m)
-                | ApiError::UpdateFailed(m)
-                | ApiError::Unknown(m) => m.to_string(),
-                ApiError::MfaRequired => "MFA is required to access this account!".into(),
-                ApiError::UserDisabled(reason) => format!("Your account has been disabled for the following reason(s): {}", reason.join(", ")),
-                ApiError::TokenExpired => "The ID token has expired!".into(),
-                ApiError::TokenInvalid => "The ID token is invalid!".into(),
-                ApiError::HashFailed 
-                | ApiError::Io(_)
-                | ApiError::DatabaseFailed(_) => "Something went wrong!".into(),
-            },
-            code : format!("{}", value),
+            code: value.into(),
+            message: value.to_string(),
         }
     }
 }
 
-impl ResponseError for ApiError {
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code())
-            .json(ApiErrorResponse::from(self))
-    }
-
-    fn status_code(&self) -> actix_web::http::StatusCode {
+impl ResponseError for ApiErrorType {
+    fn status_code(&self) -> StatusCode {
         match self {
-            ApiError::UserNotFound(_) 
-            | ApiError::UserDisabled(_)
-            | ApiError::CredentialNotFound(_)
-            | ApiError::TokenExpired
-            | ApiError::MfaRequired
-            | ApiError::TokenInvalid => StatusCode::FORBIDDEN,
-            ApiError::HashFailed 
-            | ApiError::Io(_)
-            | ApiError::SaveFailed(_)
-            | ApiError::UpdateFailed(_)
-            | ApiError::DatabaseFailed(_)
-            | ApiError::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::CredentialDuplicate(_)
-            | ApiError::CredentialOnly(_) => StatusCode::BAD_REQUEST
+            Self::CredentialIncorrect | Self::IncorrectOauthCode => StatusCode::UNAUTHORIZED,
+            Self::UserNotFound => StatusCode::NOT_FOUND,
+            Self::UserExists | Self::CredentialAssociated | Self::CredentialCannotRemove => {
+                StatusCode::CONFLICT
+            }
+            Self::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::CredentialDisabled | Self::UserAuthenticated => StatusCode::FORBIDDEN,
+            Self::ResourceNotFound => StatusCode::NOT_FOUND,
         }
     }
-} 
 
-impl From<auth::error::AuthError> for ApiError {
+    fn error_response(&self) -> actix_web::HttpResponse<actix_web::body::BoxBody> {
+        HttpResponse::build(self.status_code()).json(ApiErrorResponse::from(self))
+    }
+}
+
+impl From<auth::error::AuthError> for ApiErrorType {
     fn from(value: auth::error::AuthError) -> Self {
         use auth::error::AuthError;
-        
+
         match value {
-            AuthError::UserNotFound(message) => Self::UserNotFound(message),
-            AuthError::UserDisabled(reason) => Self::UserDisabled(reason),
-            AuthError::HashFailed => Self::HashFailed,
-            AuthError::CredentialOnly(message) => Self::CredentialOnly(message),
-            AuthError::CredentialDuplicate(message) => Self::CredentialDuplicate(message),
-            AuthError::CredentialNotFound(message) => Self::CredentialNotFound(message),
-            AuthError::MfaRequired => Self::MfaRequired,
-            AuthError::Io(error) => Self::Io(error), 
-            AuthError::SaveFailed(message) => Self::SaveFailed(message),
-            AuthError::UpdateFailed(message) => Self::UpdateFailed(message),
-            AuthError::DatabaseFailed(error) => Self::DatabaseFailed(error),
-            AuthError::TokenExpired => Self::TokenExpired,
-            AuthError::TokenInvalid => Self::TokenInvalid,
-            AuthError::Unknown(panic) => Self::Unknown(panic),
-            _ => Self::Unknown("Something went wrong!".into()),
+            AuthError::CredentialDisabled => Self::CredentialDisabled,
+            AuthError::NotFound(_) => Self::UserNotFound,
+            AuthError::Exists(_) => Self::UserExists,
+            AuthError::Invalid(_) => Self::Unknown("Invalid?".into()),
+            AuthError::CredentialCannotDelete => Self::CredentialCannotRemove,
+            AuthError::Database(_) | AuthError::Hash | AuthError::Unknown(_) => {
+                Self::Unknown("Something went wrong!".into())
+            }
         }
     }
 }
 
-impl From<SessionGetError> for ApiError {
-    fn from(_value: SessionGetError) -> Self {
+impl From<oauth2::url::ParseError> for ApiErrorType {
+    fn from(_value: oauth2::url::ParseError) -> Self {
+        Self::Unknown("The URL is incorrect or invalid!".into())
+    }
+}
+
+impl From<r2d2::Error> for ApiErrorType {
+    fn from(_value: r2d2::Error) -> Self {
+        Self::Unknown("Something went wrong!".into())
+    }
+}
+
+impl From<actix_web::error::BlockingError> for ApiErrorType {
+    fn from(_value: actix_web::error::BlockingError) -> Self {
+        Self::Unknown("Something went wrong!".into())
+    }
+}
+
+impl From<actix_identity::error::LoginError> for ApiErrorType {
+    fn from(_value: actix_identity::error::LoginError) -> Self {
         Self::Unknown("Failed to authenticate!".into())
     }
 }
 
-impl From<SessionInsertError> for ApiError {
-    fn from(_value: SessionInsertError) -> Self {
-        Self::Unknown("Failed to authenticate!".into())
+impl From<actix_identity::error::GetIdentityError> for ApiErrorType {
+    fn from(_value: actix_identity::error::GetIdentityError) -> Self {
+        Self::Unknown("Something went wrong!".into())
     }
 }
 
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
+impl From<uuid::Error> for ApiErrorType {
+    fn from(_value: uuid::Error) -> Self {
+        Self::UserNotFound
+    }
+}

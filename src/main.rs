@@ -1,7 +1,12 @@
 use actix_identity::IdentityMiddleware;
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
-use actix_web::{cookie::Key, guard, web::{self, JsonConfig, QueryConfig}, App, HttpServer};
-use api::{error::ApiErrorType, middleware::{auth::AuthenticationMiddleware, database::DatabaseMiddleware}};
+use actix_web::{
+    cookie::Key,
+    guard,
+    web::{self, JsonConfig, QueryConfig},
+    App, HttpServer,
+};
+use api::{middleware::database::DatabaseMiddleware, prelude::*};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -19,11 +24,12 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(
-                JsonConfig::default().error_handler(|_, _| ApiErrorType::Unknown("Invalid request body!".into()).into())
+                JsonConfig::default()
+                    .error_handler(|_, _| ApiError::Unknown("Invalid request body!".into()).into()),
             )
-            .app_data(
-                QueryConfig::default().error_handler(|_, _| ApiErrorType::Unknown("Invalid request GET parameters!".into()).into())
-            )   
+            .app_data(QueryConfig::default().error_handler(|_, _| {
+                ApiError::Unknown("Invalid request GET parameters!".into()).into()
+            }))
             .wrap(AuthenticationMiddleware::new())
             .wrap(DatabaseMiddleware::new(database_pool.clone()))
             .wrap(IdentityMiddleware::default())
@@ -37,7 +43,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/api")
                     .guard(guard::Host("auth.server.com"))
-                    .service(api::routes::scope()),
+                    .service(api::auth::scope()),
             )
     })
     .bind(("127.0.0.1", 80))?

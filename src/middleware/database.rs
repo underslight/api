@@ -1,5 +1,9 @@
 use std::rc::Rc;
 
+use crate::{
+    database::{DatabaseConnection, DatabasePool},
+    prelude::*,
+};
 use actix_service::{Service, Transform};
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
@@ -8,11 +12,6 @@ use actix_web::{
 use futures::{
     future::{ready, LocalBoxFuture, Ready},
     FutureExt,
-};
-
-use crate::{
-    database::{DatabaseConnection, DatabasePool},
-    error::{ApiErrorType, ApiResult},
 };
 
 pub struct Middleware<S> {
@@ -75,14 +74,14 @@ where
 pub struct Database(DatabaseConnection);
 
 impl Database {
-    fn new(pool: &DatabasePool) -> ApiResult<Self> {
+    fn new(pool: &DatabasePool) -> Result<Self> {
         Ok(Self(pool.get()?))
     }
 }
 
 impl FromRequest for Database {
-    type Error = ApiErrorType;
-    type Future = Ready<Result<Self, Self::Error>>;
+    type Error = Error;
+    type Future = Ready<Result<Self>>;
 
     fn from_request(
         req: &actix_web::HttpRequest,
@@ -92,7 +91,7 @@ impl FromRequest for Database {
         let pool = extensions.get::<DatabasePool>();
         ready(match pool {
             Some(pool) => Database::new(pool),
-            None => Err(ApiErrorType::Unknown("Something went wrong!".into())),
+            None => Err(ApiError::Unknown("Something went wrong!".into()).into()),
         })
     }
 }

@@ -1,4 +1,5 @@
+pub mod auth;
 pub mod database;
 pub mod error;
 pub mod middleware;
-pub mod routes;
+pub mod prelude;

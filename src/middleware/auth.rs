@@ -1,5 +1,5 @@
-use std::{ops::Deref, rc::Rc};
-
+use crate::database::DatabasePool;
+use crate::prelude::*;
 use actix_identity::{Identity, IdentityExt};
 use actix_service::Transform;
 use actix_web::{
@@ -11,12 +11,8 @@ use futures::{
     future::{ready, LocalBoxFuture, Ready},
     FutureExt,
 };
+use std::{ops::Deref, rc::Rc};
 use uuid::Uuid;
-
-use crate::{
-    database::DatabasePool,
-    error::{ApiErrorType, ApiResult},
-};
 
 pub struct Middleware<S> {
     service: Rc<S>,
@@ -28,7 +24,7 @@ where
 {
     type Response = ServiceResponse<B>;
     type Error = actix_web::Error;
-    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = LocalBoxFuture<'static, std::result::Result<Self::Response, Self::Error>>;
 
     actix_service::forward_ready!(service);
 
@@ -66,7 +62,7 @@ where
     type Error = actix_web::Error;
     type Transform = Middleware<S>;
     type InitError = ();
-    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+    type Future = Ready<std::result::Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
         ready(Ok(Middleware {
@@ -78,21 +74,21 @@ where
 pub struct AllowAuthenticated(pub Option<User>);
 
 impl AllowAuthenticated {
-    pub async fn new(identity: Option<&Identity>, pool: Option<DatabasePool>) -> ApiResult<Self> {
+    pub async fn new(identity: Option<&Identity>, pool: Option<DatabasePool>) -> Result<Self> {
         let identity = match identity {
             Some(identity) => identity,
             None => return Ok(Self(None)),
         };
 
-        let pool = pool.ok_or(ApiErrorType::Unknown("Something went wrong!".into()))?;
+        let pool = pool.ok_or(ApiError::Unknown("Something went wrong!".into()))?;
 
         let uid = Uuid::parse_str(identity.id()?.as_str())?;
 
-        let user = web::block::<_, ApiResult<Option<User>>>(move || {
+        let user = web::block::<_, Result<Option<User>>>(move || {
             let mut connection = pool.get()?;
             User::get_by_uid(&mut connection, &uid)
                 .map(|user| Some(user))
-                .map_err(ApiErrorType::from)
+                .map_err(Error::from)
         })
         .await??;
 
@@ -101,8 +97,8 @@ impl AllowAuthenticated {
 }
 
 impl FromRequest for AllowAuthenticated {
-    type Error = ApiErrorType;
-    type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self>>;
 
     fn from_request(
         req: &actix_web::HttpRequest,
@@ -132,16 +128,16 @@ impl Deref for AllowAuthenticated {
 pub struct RequireAuthenticated(User);
 
 impl RequireAuthenticated {
-    pub async fn new(identity: Option<&Identity>, pool: Option<DatabasePool>) -> ApiResult<Self> {
-        let identity = identity.ok_or(ApiErrorType::CredentialIncorrect)?;
+    pub async fn new(identity: Option<&Identity>, pool: Option<DatabasePool>) -> Result<Self> {
+        let identity = identity.ok_or(CredentialError::CredentialIncorrect)?;
 
-        let pool = pool.ok_or(ApiErrorType::Unknown("Something went wrong!".into()))?;
+        let pool = pool.ok_or(ApiError::Unknown("Something went wrong!".into()))?;
 
         let uid = Uuid::parse_str(identity.id()?.as_str())?;
 
-        let user = web::block::<_, ApiResult<User>>(move || {
+        let user = web::block::<_, Result<User>>(move || {
             let mut connection = pool.get()?;
-            User::get_by_uid(&mut connection, &uid).map_err(ApiErrorType::from)
+            User::get_by_uid(&mut connection, &uid).map_err(Error::from)
         })
         .await??;
 
@@ -150,8 +146,8 @@ impl RequireAuthenticated {
 }
 
 impl FromRequest for RequireAuthenticated {
-    type Error = ApiErrorType;
-    type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self>>;
 
     fn from_request(
         req: &actix_web::HttpRequest,
@@ -181,8 +177,8 @@ impl Deref for RequireAuthenticated {
 pub struct DenyAuthenticated {}
 
 impl FromRequest for DenyAuthenticated {
-    type Error = ApiErrorType;
-    type Future = Ready<Result<Self, Self::Error>>;
+    type Error = Error;
+    type Future = Ready<Result<Self>>;
 
     fn from_request(
         req: &actix_web::HttpRequest,
@@ -192,7 +188,7 @@ impl FromRequest for DenyAuthenticated {
         let identity = extensions.get::<Identity>();
 
         ready(match identity {
-            Some(_) => Err(ApiErrorType::UserAuthenticated),
+            Some(_) => Err(UserError::UserAuthenticated.into()),
             None => Ok(DenyAuthenticated {}),
         })
     }

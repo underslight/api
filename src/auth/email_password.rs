@@ -1,10 +1,4 @@
-use crate::{
-    error::{ApiErrorType, ApiResult},
-    middleware::{
-        auth::{DenyAuthenticated, RequireAuthenticated},
-        database::Database,
-    },
-};
+use crate::prelude::*;
 use actix_identity::Identity;
 use actix_web::{
     web::{self, Json},
@@ -28,11 +22,11 @@ pub async fn authenticate(
     http: HttpRequest,
     mut connection: Database,
     request: web::Json<EmailPasswordAuthenticationRequest>,
-) -> ApiResult<impl Responder> {
-    let user = web::block::<_, ApiResult<User>>(move || {
+) -> Result<impl Responder> {
+    let user = web::block::<_, Result<User>>(move || {
         let partial_credential =
             PartialEmailPassword::new(request.email.clone(), request.password.clone());
-        User::authenticate(&mut connection, partial_credential).map_err(ApiErrorType::from)
+        User::authenticate(&mut connection, partial_credential).map_err(Error::from)
     })
     .await??;
 
@@ -53,11 +47,11 @@ pub async fn register(
     http: HttpRequest,
     mut connection: Database,
     request: web::Json<EmailPasswordRegistrationRequest>,
-) -> ApiResult<impl Responder> {
-    let user = web::block::<_, ApiResult<User>>(move || {
+) -> Result<impl Responder> {
+    let user = web::block::<_, Result<User>>(move || {
         let partial_credential =
             PartialEmailPassword::new(request.email.clone(), request.password.clone());
-        User::new(&mut connection, partial_credential).map_err(ApiErrorType::from)
+        User::new(&mut connection, partial_credential).map_err(Error::from)
     })
     .await??;
 
@@ -82,18 +76,18 @@ pub async fn associate(
     user: RequireAuthenticated,
     mut connection: Database,
     request: Json<EmailPasswordAssociationRequest>,
-) -> ApiResult<impl Responder> {
-    web::block::<_, ApiResult<()>>(move || {
-        match user.credentials(&mut connection)?.email_password {
-            Some(_) => Err(ApiErrorType::CredentialAssociated),
+) -> Result<impl Responder> {
+    web::block::<_, Result<()>>(
+        move || match user.credentials(&mut connection)?.email_password {
+            Some(_) => Err(CredentialError::CredentialAssociated.into()),
             None => {
                 PartialEmailPassword::new(request.email.clone(), request.password.clone())
                     .associate(&mut connection, user.uid())?;
 
                 Ok(())
             }
-        }
-    })
+        },
+    )
     .await??;
 
     Ok(HttpResponse::Ok().json(EmailPasswordAssociationResponse { success: true }))
@@ -115,8 +109,8 @@ pub async fn remove(
     user: RequireAuthenticated,
     mut connection: Database,
     request: Json<EmailPasswordRemovalRequest>,
-) -> ApiResult<impl Responder> {
-    web::block::<_, ApiResult<()>>(move || {
+) -> Result<impl Responder> {
+    web::block::<_, Result<()>>(move || {
         let partial_credential =
             PartialEmailPassword::new(request.email.clone(), request.password.clone());
         let credential = User::authenticate(&mut connection, partial_credential)?
@@ -124,12 +118,10 @@ pub async fn remove(
             .email_password(&mut connection)?;
 
         if credential.uid() != user.uid() {
-            return Err(ApiErrorType::CredentialIncorrect);
+            return Err(CredentialError::CredentialIncorrect.into());
         }
 
-        credential
-            .delete(&mut connection)
-            .map_err(ApiErrorType::from)
+        credential.delete(&mut connection).map_err(Error::from)
     })
     .await??;
 
